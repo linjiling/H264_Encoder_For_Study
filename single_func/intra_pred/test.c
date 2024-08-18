@@ -2,29 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "global.h"
-#include "intra_pred4x4.h"
-#include "defines.h"
-#include "mb_access.h"
-
-void generate_pred_error_4x4(imgpel **cur_img, imgpel **prd_img, imgpel **cur_prd, int **m7, int pic_opix_x, int block_x)
-{
-  int j, i, *m7_line;
-  imgpel *cur_line, *prd_line;
-
-  for (j = 0; j < BLOCK_SIZE; j++)
-  {
-    m7_line = &m7[j][block_x];
-    cur_line = &cur_img[j][pic_opix_x];
-    prd_line = prd_img[j];
-    memcpy(&cur_prd[j][block_x], prd_line, BLOCK_SIZE * sizeof(imgpel));
-
-    for (i = 0; i < BLOCK_SIZE; i++)
-    {
-      *m7_line++ = (int) (*cur_line++ - *prd_line++);
-    }
-  }        
-}
+#define BLK_WIDTH 4 //当前块宽度
+#define BLK_HIGHT 4 //当前块高度
+#define BLOCK_SIZE 4
+#define BLOCK_SHIFT 2
 
 // Predictor array index definitions
 #define P_X (PredPel[0])
@@ -41,86 +22,19 @@ void generate_pred_error_4x4(imgpel **cur_img, imgpel **prd_img, imgpel **cur_pr
 #define P_K (PredPel[11])
 #define P_L (PredPel[12])
 
-void set_intrapred_4x4(Macroblock *currMB, ColorPlane pl, int img_x,int img_y, int *left_available, int *up_available, int *all_available)
-{
-  VideoParameters *p_Vid = currMB->p_Vid;
-  InputParameters *p_Inp = currMB->p_Inp;
+typedef unsigned char imgpel;
 
-  imgpel  *PredPel = currMB->intra4x4_pred[pl];  // array of predictor pels
-  imgpel   **img_enc = p_Vid->enc_picture->p_curr_img;
-
-  int ioff = (img_x & 15);
-  int joff = (img_y & 15);
-
-  PixelPos pix_a, pix_b, pix_c, pix_d;
-
-  int block_available_up;
-  int block_available_left;
-  int block_available_up_left;
-  int block_available_up_right;
-  int *mb_size = p_Vid->mb_size[IS_LUMA];
-
-  getNonAffNeighbour(currMB, ioff - 1, joff    , mb_size, &pix_a);
-  getNonAffNeighbour(currMB, ioff    , joff - 1, mb_size, &pix_b);
-  getNonAffNeighbour(currMB, ioff + 4, joff - 1, mb_size, &pix_c);
-  getNonAffNeighbour(currMB, ioff - 1, joff - 1, mb_size, &pix_d);
-
-  pix_c.available = pix_c.available && !((ioff==4) && ((joff==4)||(joff==12)));
-
-  
-  block_available_left     = pix_a.available;
-  block_available_up       = pix_b.available;
-  block_available_up_right = pix_c.available;
-  block_available_up_left  = pix_d.available;
-
-  *left_available = block_available_left;
-  *up_available   = block_available_up;
-  *all_available  = block_available_up && block_available_left && block_available_up_left;
-
-  // form predictor pels
-  if (block_available_up)
-  {
-    memcpy(&PredPel[1], &img_enc[pix_b.pos_y][pix_b.pos_x], BLOCK_SIZE * sizeof(imgpel));
-  }
-  else
-  {
-    P_A = P_B = P_C = P_D = (imgpel) p_Vid->dc_pred_value;
-  }
-
-  if (block_available_up_right)
-  {
-    memcpy(&PredPel[5], &img_enc[pix_c.pos_y][pix_c.pos_x], BLOCK_SIZE * sizeof(imgpel));
-  }
-  else
-  {
-    P_E = P_F = P_G = P_H = P_D;
-  }
-
-  if (block_available_left)
-  {
-    int pos_y = pix_a.pos_y;
-    int pos_x = pix_a.pos_x;
-    P_I = img_enc[pos_y++][pos_x];
-    P_J = img_enc[pos_y++][pos_x];
-    P_K = img_enc[pos_y++][pos_x];
-    P_L = img_enc[pos_y  ][pos_x];
-  }
-  else
-  {
-    P_I = P_J = P_K = P_L = p_Vid->dc_pred_value;
-  }
-
-  if (block_available_up_left)
-  {
-    P_X = img_enc[pix_d.pos_y][pix_d.pos_x];
-  }
-  else
-  {
-    P_X = p_Vid->dc_pred_value;
-  }
-}
-
-
+enum {
+  VERT_PRED            = 0,
+  HOR_PRED             = 1,
+  DC_PRED              = 2,
+  DIAG_DOWN_LEFT_PRED  = 3,
+  DIAG_DOWN_RIGHT_PRED = 4,
+  VERT_RIGHT_PRED      = 5,
+  HOR_DOWN_PRED        = 6,
+  VERT_LEFT_PRED       = 7,
+  HOR_UP_PRED          = 8
+} I4x4PredModes;
 /*!
  ************************************************************************
  * \brief
@@ -353,11 +267,8 @@ static inline void get_i4x4_horup(imgpel **cur_pred, imgpel *PredPel)
  *    mpr_4x4:
  ************************************************************************
  */
-void get_intrapred_4x4(Macroblock *currMB, ColorPlane pl, int i4x4_mode,  int left_available, int up_available)
+void get_intrapred_4x4(imgpel *PredPel, imgpel ***curr_mpr_4x4, int i4x4_mode,  int left_available, int up_available)
 {
-
-  imgpel        *PredPel = currMB->intra4x4_pred[pl];  // array of predictor pels
-  imgpel ***curr_mpr_4x4 = currMB->p_Slice->mpr_4x4[pl];
 
   switch (i4x4_mode)
   {
@@ -392,4 +303,63 @@ void get_intrapred_4x4(Macroblock *currMB, ColorPlane pl, int i4x4_mode,  int le
     printf("invalid prediction mode \n");
     break;
   }
+}
+
+int get_mem2Dpel(imgpel ***array2D, int dim0, int dim1)
+{
+  int i;
+
+  if((*array2D    = (imgpel**)malloc(dim0 *        sizeof(imgpel*))) == NULL)
+    printf("get_mem2Dpel: array2D");
+  if((*(*array2D) = (imgpel* )malloc(dim0 * dim1 * sizeof(imgpel ))) == NULL)
+    printf("get_mem2Dpel: array2D");
+
+  for(i = 1 ; i < dim0; i++)
+  {
+    (*array2D)[i] = (*array2D)[i-1] + dim1;
+  }
+
+  return dim0 * (sizeof(imgpel*) + dim1 * sizeof(imgpel));
+}
+
+int get_mem3Dpel(imgpel ****array3D, int dim0, int dim1, int dim2)
+{
+  int i, mem_size = dim0 * sizeof(imgpel**);
+
+  if(((*array3D) = (imgpel***)malloc(dim0 * sizeof(imgpel**))) == NULL)
+    printf("get_mem3Dpel: array3D");
+
+  mem_size += get_mem2Dpel(*array3D, dim0 * dim1, dim2);
+
+  for(i = 1; i < dim0; i++)
+    (*array3D)[i] = (*array3D)[i - 1] + dim1;
+
+  return mem_size;
+}
+
+int main(int argc, char *argv[])
+{
+    imgpel        PredPel[17];
+    imgpel ***curr_mpr_4x4;
+    int i;
+
+    get_mem3Dpel(&curr_mpr_4x4, 9, 4, 4);
+
+    for (i = 0; i < 17; i++) {
+        PredPel[i] = rand() % 32;
+    }
+
+
+    for (i = 0; i < 9; i++) {
+        get_intrapred_4x4(PredPel, curr_mpr_4x4, i, 1, 1);
+	printf("now intra pred mode[%d]:\n", i);
+	printf("%2d %2d %2d %2d %2d %2d %2d %2d %2d\n", PredPel[0], PredPel[1], PredPel[2], PredPel[3], PredPel[4],
+			                                PredPel[5], PredPel[6], PredPel[7], PredPel[8]);
+	printf("%2d %2d %2d %2d %2d\n", PredPel[9], curr_mpr_4x4[i][0][0], curr_mpr_4x4[i][0][1], curr_mpr_4x4[i][0][2], curr_mpr_4x4[i][0][3]);
+	printf("%2d %2d %2d %2d %2d\n", PredPel[10], curr_mpr_4x4[i][1][0], curr_mpr_4x4[i][1][1], curr_mpr_4x4[i][1][2], curr_mpr_4x4[i][1][3]);
+	printf("%2d %2d %2d %2d %2d\n", PredPel[11], curr_mpr_4x4[i][2][0], curr_mpr_4x4[i][2][1], curr_mpr_4x4[i][2][2], curr_mpr_4x4[i][2][3]);
+	printf("%2d %2d %2d %2d %2d\n", PredPel[12], curr_mpr_4x4[i][3][0], curr_mpr_4x4[i][3][1], curr_mpr_4x4[i][3][2], curr_mpr_4x4[i][3][3]);
+    }
+    
+    return 0;
 }
