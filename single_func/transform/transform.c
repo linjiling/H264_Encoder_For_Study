@@ -509,6 +509,7 @@ int main(int argc, char* argv[])
     p_Inp.AdaptRoundingFixed = 0;
     p_Vid.bitdepth_luma_qp_scale = 0;
     p_Vid.bitdepth_chroma_qp_scale = 0;
+    p_Vid.num_blk8x8_uv = 2;
 
     get_mem2Dint(&p_Slice.tblk16x16, MB_BLOCK_SIZE, MB_BLOCK_SIZE);
     get_mem4Dint(&p_Slice.cofAC, BLOCK_SIZE + p_Vid.num_blk8x8_uv, BLOCK_SIZE, 2, 65);
