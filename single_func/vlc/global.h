@@ -2,6 +2,26 @@
 #define _GLOBAL_H_
 
 #include "typedefs.h"
+#include "types.h"
+#include "defines.h"
+
+typedef struct block_pos BlockPos;
+
+struct block_pos
+{
+  short x;
+  short y;
+};
+
+typedef struct pix_pos
+{
+  int   available;
+  int   mb_addr;
+  short x;
+  short y;
+  short pos_x;
+  short pos_y;
+} PixelPos;
 
 //! Bitstream
 typedef struct bit_stream_enc
@@ -42,4 +62,72 @@ typedef struct syntaxelement_enc
   void    (*mapping)(int value1, int value2, int* len_ptr, int* info_ptr);
 
 } SyntaxElement;
+
+typedef struct
+{
+    unsigned int profile_idc;  
+} seq_parameter_set_rbsp_t;
+
+typedef struct
+{
+    Boolean   constrained_intra_pred_flag;
+} pic_parameter_set_rbsp_t;
+
+typedef struct video_par
+{
+    int mb_size[MAX_PLANE][2];
+    BlockPos *PicPos;
+    pic_parameter_set_rbsp_t *active_pps;
+    seq_parameter_set_rbsp_t *active_sps;
+    int num_cdc_coeff;
+    int ***nz_coeff;
+    ColorFormat yuv_format;
+    short   *intra_block;
+    unsigned int FrameSizeInMbs;
+    unsigned int PicWidthInMbs;
+    int num_blk8x8_uv;
+} VideoParameters;
+
+typedef struct datapartition_enc
+{
+  Bitstream           *bitstream;
+} DataPartition;
+
+typedef struct slice
+{
+    struct video_par    *p_Vid;
+    short               partition_mode;
+    int     ****cofAC;
+    int     ***cofDC;
+    DataPartition       *partArr;
+    short  idr_flag;
+} Slice;
+
+typedef struct bit_counter BitCounter;
+struct bit_counter
+{
+  int mb_total;
+  unsigned short mb_mode;
+  unsigned short mb_inter;
+  unsigned short mb_cbp;
+  unsigned short mb_delta_quant;
+  int mb_y_coeff;
+  int mb_uv_coeff;
+  int mb_cb_coeff;
+  int mb_cr_coeff;
+  int mb_stuffing;
+};
+
+typedef struct macroblock_enc
+{
+    struct video_par   *p_Vid;
+    struct slice       *p_Slice;
+
+    int                 mbAddrX;
+    int                 mbAddrA, mbAddrB, mbAddrC, mbAddrD;
+    byte                mbAvailA, mbAvailB, mbAvailC, mbAvailD;
+    int                 DeblockCall;
+    BitCounter          bits;
+    short               mb_type;
+} Macroblock;
 #endif
